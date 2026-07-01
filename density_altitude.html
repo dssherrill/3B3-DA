@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Density Altitude Forecast — GBSC</title>
+<style>
+  :root{
+    --bg:#0a0e17;
+    --panel:#111826;
+    --panel-2:#0e1420;
+    --hairline:#22304a;
+    --amber:#ffb627;
+    --amber-dim:#8a6320;
+    --cyan:#57d9c9;
+    --red:#ff6b5e;
+    --text:#e9edf5;
+    --text-dim:#8b98b3;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);}
+  body{
+    font-family:'IBM Plex Mono','SF Mono',Consolas,monospace;
+    -webkit-font-smoothing:antialiased;
+    background: radial-gradient(1200px 600px at 50% -10%, #142033 0%, var(--bg) 60%);
+    min-height:100vh;
+  }
+  header{
+    padding:28px 24px 18px;
+    text-align:center;
+    border-bottom:1px solid var(--hairline);
+  }
+  header .eyebrow{
+    letter-spacing:.28em; font-size:11px; color:var(--text-dim);
+    text-transform:uppercase; margin-bottom:8px;
+  }
+  header h1{
+    font-family:'Space Grotesk',Arial,sans-serif;
+    font-weight:700; font-size:clamp(22px,4vw,32px);
+    margin:0 0 6px; letter-spacing:-0.01em;
+  }
+  header .sub{color:var(--text-dim); font-size:13px;}
+  header .sub span{color:var(--cyan);}
+
+  .wrap{max-width:1000px;margin:0 auto;padding:22px 16px 60px;}
+
+  .status{text-align:center;color:var(--text-dim);font-size:13px;padding:40px 0;line-height:1.7;}
+  .status.error{color:var(--red);}
+  .status button{
+    margin-top:10px;background:transparent;border:1px solid var(--hairline);
+    color:var(--amber);font-family:inherit;font-size:12px;padding:7px 16px;
+    border-radius:7px;cursor:pointer;
+  }
+
+  .gauge-row{display:flex;gap:20px;flex-wrap:wrap;align-items:stretch;margin-bottom:22px;}
+  .gauge-card{
+    background:linear-gradient(180deg,var(--panel),var(--panel-2));
+    border:1px solid var(--hairline); border-radius:14px; padding:20px;
+    flex:1 1 280px; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; text-align:center;
+  }
+  .gauge-label{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--text-dim);margin-bottom:10px;}
+  .gauge-value{font-family:'Space Grotesk',Arial,sans-serif;font-size:44px;font-weight:700;line-height:1;}
+  .gauge-unit{font-size:14px;color:var(--text-dim);margin-top:4px;}
+  .gauge-note{font-size:11px;color:var(--text-dim);margin-top:10px;max-width:220px;}
+
+  .stat-list{
+    flex:2 1 380px;
+    background:linear-gradient(180deg,var(--panel),var(--panel-2));
+    border:1px solid var(--hairline); border-radius:14px; padding:18px 20px;
+    display:grid; grid-template-columns:1fr 1fr; gap:14px 24px;
+  }
+  .stat{border-bottom:1px solid var(--hairline);padding-bottom:10px;}
+  .stat .k{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--text-dim);}
+  .stat .v{font-family:'Space Grotesk',Arial,sans-serif;font-size:19px;margin-top:3px;}
+
+  .panel{
+    background:linear-gradient(180deg,var(--panel),var(--panel-2));
+    border:1px solid var(--hairline); border-radius:14px; padding:18px 18px 8px; margin-bottom:22px;
+  }
+  .panel h2{
+    font-family:'Space Grotesk',Arial,sans-serif; font-size:14px; letter-spacing:.08em;
+    text-transform:uppercase; color:var(--text-dim); margin:0 0 14px;
+    display:flex; justify-content:space-between; align-items:center;
+  }
+  .range-toggle{display:flex;gap:6px;}
+  .range-toggle button{
+    background:transparent;border:1px solid var(--hairline);color:var(--text-dim);
+    font-family:inherit;font-size:11px;padding:5px 10px;border-radius:7px;cursor:pointer;letter-spacing:.05em;
+  }
+  .range-toggle button.active{color:var(--bg);background:var(--amber);border-color:var(--amber);font-weight:600;}
+
+  svg.chart{width:100%;height:auto;display:block;}
+  .chart-tip{
+    position:absolute; pointer-events:none; background:#0e1420; border:1px solid var(--hairline);
+    border-radius:8px; padding:8px 10px; font-size:11px; color:var(--text); display:none; white-space:nowrap;
+  }
+  .chart-wrap{position:relative;}
+
+  table{width:100%;border-collapse:collapse;font-size:12.5px;}
+  thead th{
+    text-align:left;color:var(--text-dim);font-weight:500;letter-spacing:.05em;text-transform:uppercase;
+    font-size:10px;padding:8px 10px;border-bottom:1px solid var(--hairline);
+    position:sticky;top:0;background:var(--panel);
+  }
+  tbody td{padding:8px 10px;border-bottom:1px solid var(--hairline);}
+  tbody tr:hover{background:rgba(255,255,255,0.02);}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;}
+  .table-scroll{max-height:360px;overflow-y:auto;border-radius:8px;}
+
+  .legend{display:flex;gap:18px;flex-wrap:wrap;font-size:11px;color:var(--text-dim);padding:10px 4px 16px;}
+  .legend span{display:inline-flex;align-items:center;}
+
+  footer{text-align:center;color:var(--text-dim);font-size:11px;padding:10px 20px 40px;line-height:1.6;}
+  footer a{color:var(--cyan);text-decoration:none;}
+  .note-box{
+    background:rgba(255,182,39,0.08); border:1px solid var(--amber-dim); border-radius:10px;
+    padding:12px 16px; font-size:12px; color:var(--text-dim); margin-bottom:22px; line-height:1.55;
+  }
+  .note-box b{color:var(--amber);}
+  @media (max-width:640px){ .stat-list{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="eyebrow">GBSC · Soaring Weather Tool</div>
+  <h1>Density Altitude Forecast</h1>
+  <div class="sub" id="locSub">NWS gridpoint BOX/48,100 · <span id="locName">loading…</span></div>
+</header>
+
+<div class="wrap">
+
+  <div class="note-box">
+    <b>Data source.</b> Hourly temperature and dewpoint come from the NWS gridpoint forecast at
+    <code>api.weather.gov/gridpoints/BOX/48,100/forecast/hourly</code>. Surface pressure comes from the raw
+    numerical gridpoint data at the same office/grid (<code>.../gridpoints/BOX/48,100</code>) when NWS publishes
+    it for this office; if a pressure forecast isn't available for a given hour, this page falls back to standard
+    sea-level pressure (29.92" / 1013.25 hPa) for that hour and flags it (≈) in the table, using field elevation
+    alone for pressure altitude that hour.
+  </div>
+
+  <div id="status" class="status">Fetching forecast…</div>
+
+  <div id="content" style="display:none;">
+
+    <div class="gauge-row">
+      <div class="gauge-card">
+        <div class="gauge-label">Current Density Altitude</div>
+        <div class="gauge-value" id="daNow">—</div>
+        <div class="gauge-unit">feet</div>
+        <div class="gauge-note" id="daNowNote"></div>
+      </div>
+      <div class="stat-list" id="statList"></div>
+    </div>
+
+    <div class="panel">
+      <h2>
+        <span>Density Altitude Trend</span>
+        <span class="range-toggle" id="rangeToggle">
+          <button data-h="24">24H</button>
+          <button data-h="72" class="active">72H</button>
+          <button data-h="156">FULL</button>
+        </span>
+      </h2>
+      <div class="chart-wrap">
+        <svg id="chartSvg" class="chart" viewBox="0 0 900 340" preserveAspectRatio="none"></svg>
+        <div id="chartTip" class="chart-tip"></div>
+      </div>
+      <div class="legend">
+        <span><span class="dot" style="background:var(--amber)"></span>Density altitude</span>
+        <span><span class="dot" style="background:var(--cyan)"></span>Field elevation (pressure alt., std. day)</span>
+        <span><span class="dot" style="background:var(--text-dim)"></span>Surface temperature (°F, right axis)</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2><span>Hourly Detail</span></h2>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Time</th><th>Temp °F</th><th>Dewpt °F</th><th>Pressure hPa</th><th>Press. Alt ft</th><th>Density Alt ft</th></tr>
+          </thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <footer>
+    Density altitude is computed from actual air density rather than the FAA's dry-air rule of thumb: dewpoint
+    gives the saturation vapor pressure (Tetens formula), which combines with temperature and pressure into a
+    virtual temperature — the temperature dry air would need to match the density of the actual, moist air.
+    Density altitude is then the altitude in the standard atmosphere with that same density. Humid air is less
+    dense than dry air at the same temperature and pressure, so higher humidity pushes density altitude up.
+    Pressure altitude (dry) and field elevation still use the standard atmosphere directly, unaffected by
+    moisture. Data: <a href="https://www.weather.gov/documentation/services-web-api" target="_blank">api.weather.gov</a>.
+    For flight planning, always cross-check current METARs / TAFs and official briefings.
+  </footer>
+</div>
+
+<script>
+const HOURLY_URL = 'https://api.weather.gov/gridpoints/BOX/48,100/forecast/hourly';
+const RAW_URL = 'https://api.weather.gov/gridpoints/BOX/48,100';
+
+let rawHours = [];
+
+function fToC(f){ return (f-32)*5/9; }
+function cToF(c){ return c*9/5+32; }
+function fmt(n,d=0){ return Number(n).toLocaleString(undefined,{maximumFractionDigits:d,minimumFractionDigits:d}); }
+
+function pressureAltitudeFt(pressureHpa){
+  return 145366.45 * (1 - Math.pow(pressureHpa/1013.25, 0.190284));
+}
+
+// Saturation vapor pressure (Tetens formula, hPa) at a given temperature in °C.
+// At the dewpoint, air is saturated, so this also gives the actual vapor pressure e.
+function satVaporPressureHpa(tC){
+  return 6.1078 * Math.pow(10, (7.5*tC)/(237.3+tC));
+}
+
+// Virtual temperature (K): the temperature dry air would need to match the
+// density of the actual moist air at the same pressure. Humid air is less
+// dense than dry air at the same T/P, so Tv > T whenever moisture is present.
+function virtualTempK(tempC, dewC, pressureHpa){
+  const Tk = tempC + 273.15;
+  if(dewC == null) return Tk; // no moisture data -> fall back to dry air
+  const e = satVaporPressureHpa(dewC);
+  const denom = 1 - 0.378*(e/pressureHpa);
+  return Tk / denom;
+}
+
+// Density altitude computed directly from air density (via virtual temperature),
+// rather than the FAA's dry-air rule-of-thumb. This is the altitude in the
+// standard atmosphere that has the same air density as the actual moist air.
+function densityAltitudeFt(pressureHpa, tempC, dewC){
+  const pa = pressureAltitudeFt(pressureHpa);
+
+  const Tv = virtualTempK(tempC, dewC, pressureHpa);
+  const rho = (pressureHpa*100) / (287.05 * Tv); // kg/m^3, moist-air density
+
+  const rho0 = 1.225, T0 = 288.15, L = 0.0065; // ISA sea-level density, temp, lapse rate
+  const ratio = Math.max(rho/rho0, 1e-6);
+  const hMeters = (T0/L) * (1 - Math.pow(ratio, 1/4.2559));
+  const da = hMeters * 3.28084;
+
+  return {pa, da};
+}
+function daColor(da, fieldElevFt){
+  const gain = da - fieldElevFt;
+  if (gain < 1500) return '#57d9c9';
+  if (gain < 3500) return '#ffb627';
+  return '#ff6b5e';
+}
+
+// Parse a simplified ISO8601 duration (PT#H, P#D, P#DT#H) into hours.
+function parseDurationHours(dur){
+  const dMatch = dur.match(/P(?:(\d+)D)?T?(?:(\d+)H)?/);
+  const days = dMatch && dMatch[1] ? parseInt(dMatch[1],10) : 0;
+  const hrs = dMatch && dMatch[2] ? parseInt(dMatch[2],10) : 0;
+  return days*24 + hrs;
+}
+
+// Expand NWS gridpoint {validTime:"2026-07-01T12:00:00+00:00/PT3H", value:...} entries
+// into an array of {start:Date, end:Date, value} intervals.
+function expandIntervals(values){
+  return (values||[]).map(v=>{
+    const [startStr, durStr] = v.validTime.split('/');
+    const start = new Date(startStr);
+    const hrs = parseDurationHours(durStr);
+    const end = new Date(start.getTime() + hrs*3600*1000);
+    return {start, end, value: v.value};
+  });
+}
+function valueAt(intervals, t){
+  for(const iv of intervals){
+    if(t >= iv.start && t < iv.end) return iv.value;
+  }
+  return null;
+}
+
+async function fetchJson(url){
+  const res = await fetch(url);
+  if(!res.ok) throw new Error(url.split('/').slice(-2).join('/') + ' \u2192 HTTP ' + res.status);
+  return res.json();
+}
+
+async function load(){
+  const statusEl = document.getElementById('status');
+  try{
+    const [hourlyData, rawData] = await Promise.all([
+      fetchJson(HOURLY_URL),
+      fetchJson(RAW_URL).catch(()=>null) // pressure/elevation are a bonus, not required
+    ]);
+
+    const periods = hourlyData.properties.periods;
+
+    let elevFt = 0;
+    if(rawData && rawData.properties.elevation && rawData.properties.elevation.value != null){
+      const elevVal = rawData.properties.elevation.value;
+      const unit = rawData.properties.elevation.unitCode || '';
+      elevFt = unit.includes('ft') ? elevVal : elevVal * 3.28084;
+    }
+
+    let pressureIntervals = [];
+    if(rawData && rawData.properties.pressure){
+      pressureIntervals = expandIntervals(rawData.properties.pressure.values);
+    }
+
+    document.getElementById('locName').textContent =
+      elevFt ? `elev. ${fmt(elevFt)} ft MSL` : 'elevation unavailable';
+
+    rawHours = periods.map(p=>{
+      const time = new Date(p.startTime);
+      const tempF = p.temperature;
+      const tempC = fToC(tempF);
+      const dewC = p.dewpoint && p.dewpoint.value != null ? p.dewpoint.value : null;
+
+      let pressurePa = valueAt(pressureIntervals, time);
+      let pressureHpa, pressureIsStandard;
+      if(pressurePa != null){
+        pressureHpa = pressurePa / 100;
+        pressureIsStandard = false;
+      } else {
+        pressureHpa = 1013.25;
+        pressureIsStandard = true;
+      }
+
+      const {pa, da} = densityAltitudeFt(pressureHpa, tempC, dewC);
+      return {time, tempC, dewC, pressure: pressureHpa, pressureIsStandard, pa, da};
+    }).filter(h => !isNaN(h.da));
+
+    if(!elevFt && rawHours.length){
+      // fall back: use first hour's standard-day pressure altitude as a stand-in field elevation
+      elevFt = rawHours[0].pa;
+    }
+    window.__fieldElevFt = elevFt;
+
+    render();
+    statusEl.style.display='none';
+    document.getElementById('content').style.display='block';
+  }catch(err){
+    statusEl.innerHTML =
+      'Could not load forecast data (' + err.message + ').<br><br>' +
+      'If you are viewing this inside Claude\'s in-chat preview, that sandbox blocks live API calls \u2014 ' +
+      'save this file and open it directly in your browser instead.<br><br>' +
+      '<button id="retryBtn">Retry</button>';
+    statusEl.classList.add('error');
+    const btn = document.getElementById('retryBtn');
+    if(btn) btn.onclick = ()=>{ statusEl.textContent='Fetching forecast…'; statusEl.classList.remove('error'); load(); };
+  }
+}
+
+function currentHourIndex(){
+  const now = Date.now();
+  let idx = 0, best = Infinity;
+  rawHours.forEach((h,i)=>{
+    const diff = Math.abs(h.time.getTime()-now);
+    if(diff<best){best=diff; idx=i;}
+  });
+  return idx;
+}
+
+function render(){
+  const fieldElevFt = window.__fieldElevFt;
+  const nowIdx = currentHourIndex();
+  const now = rawHours[nowIdx];
+
+  const daNow = document.getElementById('daNow');
+  daNow.textContent = fmt(now.da);
+  daNow.style.color = daColor(now.da, fieldElevFt);
+
+  const gain = now.da - fieldElevFt;
+  document.getElementById('daNowNote').textContent =
+    gain < 1500 ? 'Good performance — close to field elevation.' :
+    gain < 3500 ? 'Moderate degradation — expect longer ground roll & reduced climb.' :
+    'Significant degradation — high & hot conditions, plan accordingly.';
+
+  const peak = rawHours.slice(nowIdx, nowIdx+24).reduce((a,b)=> b.da>a.da?b:a, now);
+
+  const dryDA = densityAltitudeFt(now.pressure, now.tempC, null).da;
+  const humidityAdd = now.da - dryDA;
+
+  const stats = [
+    ['Field elevation', fmt(fieldElevFt)+' ft'],
+    ['Surface temp / dewpt', fmt(cToF(now.tempC),0)+' / '+(now.dewC!=null?fmt(cToF(now.dewC),0):'—')+' °F'],
+    ['Surface pressure', (now.pressureIsStandard?'≈ ':'')+fmt(now.pressure,1)+' hPa'],
+    ['Pressure altitude', fmt(now.pa)+' ft'],
+    ['Humidity contribution', (humidityAdd>=0?'+':'')+fmt(humidityAdd)+' ft'],
+    ['Peak DA (next 24h)', fmt(peak.da)+' ft @ '+peak.time.toLocaleTimeString([], {hour:'numeric'})],
+    ['DA above field', (gain>=0?'+':'')+fmt(gain)+' ft'],
+  ];
+  document.getElementById('statList').innerHTML = stats.map(([k,v])=>
+    `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+
+  buildChart(72);
+  buildTable();
+
+  document.querySelectorAll('#rangeToggle button').forEach(btn=>{
+    btn.onclick = ()=>{
+      document.querySelectorAll('#rangeToggle button').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      buildChart(parseInt(btn.dataset.h,10));
+    };
+  });
+}
+
+// ---- Dependency-free SVG line chart ----
+function buildChart(hours){
+  const nowIdx = currentHourIndex();
+  const slice = rawHours.slice(nowIdx, nowIdx + hours);
+  if(!slice.length) return;
+
+  const fieldElevFt = window.__fieldElevFt;
+  const W = 900, H = 340, padL = 46, padR = 46, padT = 16, padB = 34;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+
+  const daVals = slice.map(h=>h.da);
+  const tempVals = slice.map(h=>cToF(h.tempC));
+  const yMin = Math.min(...daVals, fieldElevFt) - 300;
+  const yMax = Math.max(...daVals, fieldElevFt) + 300;
+  const tMin = Math.min(...tempVals) - 5, tMax = Math.max(...tempVals) + 5;
+
+  const x = i => padL + (slice.length===1 ? plotW/2 : (i/(slice.length-1))*plotW);
+  const yDa = v => padT + plotH - ((v-yMin)/(yMax-yMin))*plotH;
+  const yT = v => padT + plotH - ((v-tMin)/(tMax-tMin))*plotH;
+
+  const daPath = slice.map((h,i)=> (i===0?'M':'L') + x(i).toFixed(1) + ',' + yDa(h.da).toFixed(1)).join(' ');
+  const daArea = daPath + ` L${x(slice.length-1).toFixed(1)},${(padT+plotH).toFixed(1)} L${x(0).toFixed(1)},${(padT+plotH).toFixed(1)} Z`;
+  const tempPath = slice.map((h,i)=> (i===0?'M':'L') + x(i).toFixed(1) + ',' + yT(cToF(h.tempC)).toFixed(1)).join(' ');
+  const fieldY = yDa(fieldElevFt).toFixed(1);
+
+  let gridSvg = '';
+  for(let s=0; s<=4; s++){
+    const val = yMin + (yMax-yMin)*s/4;
+    const gy = yDa(val);
+    gridSvg += `<line x1="${padL}" y1="${gy.toFixed(1)}" x2="${W-padR}" y2="${gy.toFixed(1)}" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>`;
+    gridSvg += `<text x="${padL-8}" y="${(gy+4).toFixed(1)}" text-anchor="end" font-size="11" fill="#8b98b3">${fmt(val)}</text>`;
+  }
+  const step = Math.max(1, Math.round(slice.length / (hours>72?12:8)));
+  let xLabels = '';
+  slice.forEach((h,i)=>{
+    if(i % step === 0){
+      const lbl = h.time.toLocaleString([], {weekday:'short', hour:'numeric'});
+      xLabels += `<text x="${x(i).toFixed(1)}" y="${H-10}" text-anchor="middle" font-size="10" fill="#8b98b3">${lbl}</text>`;
+    }
+  });
+
+  const pts = slice.map((h,i)=>
+    `<circle cx="${x(i).toFixed(1)}" cy="${yDa(h.da).toFixed(1)}" r="7" fill="transparent"
+      data-t="${h.time.toISOString()}" data-da="${Math.round(h.da)}" data-temp="${Math.round(cToF(h.tempC))}" class="hoverpt"/>`
+  ).join('');
+
+  const svg = document.getElementById('chartSvg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.innerHTML = `
+    ${gridSvg}
+    <line x1="${padL}" y1="${fieldY}" x2="${W-padR}" y2="${fieldY}" stroke="#57d9c9" stroke-width="1.5" stroke-dasharray="4,4"/>
+    <path d="${daArea}" fill="rgba(255,182,39,0.12)" stroke="none"/>
+    <path d="${tempPath}" fill="none" stroke="#8b98b3" stroke-width="1.5"/>
+    <path d="${daPath}" fill="none" stroke="#ffb627" stroke-width="2.2"/>
+    ${xLabels}
+    ${pts}
+  `;
+
+  const tip = document.getElementById('chartTip');
+  svg.querySelectorAll('.hoverpt').forEach(pt=>{
+    pt.addEventListener('mousemove', (e)=>{
+      const rect = svg.getBoundingClientRect();
+      const t = new Date(pt.dataset.t);
+      tip.style.display='block';
+      tip.style.left = (e.clientX - rect.left + 12) + 'px';
+      tip.style.top = (e.clientY - rect.top - 10) + 'px';
+      tip.innerHTML = `<b>${t.toLocaleString([], {weekday:'short', hour:'numeric', minute:'2-digit'})}</b><br>
+        DA: ${pt.dataset.da} ft &nbsp; Temp: ${pt.dataset.temp}°F`;
+    });
+    pt.addEventListener('mouseleave', ()=>{ tip.style.display='none'; });
+  });
+}
+
+function buildTable(){
+  const fieldElevFt = window.__fieldElevFt;
+  const nowIdx = currentHourIndex();
+  const slice = rawHours.slice(nowIdx, nowIdx+48);
+  document.getElementById('tableBody').innerHTML = slice.map(h=>{
+    const c = daColor(h.da, fieldElevFt);
+    return `<tr>
+      <td>${h.time.toLocaleString([], {weekday:'short', hour:'numeric', minute:'2-digit'})}</td>
+      <td>${fmt(cToF(h.tempC))}</td>
+      <td>${h.dewC!=null ? fmt(cToF(h.dewC)) : '—'}</td>
+      <td>${h.pressureIsStandard?'≈ ':''}${fmt(h.pressure,1)}</td>
+      <td>${fmt(h.pa)}</td>
+      <td><span class="dot" style="background:${c}"></span>${fmt(h.da)}</td>
+    </tr>`;
+  }).join('');
+}
+
+load();
+</script>
+</body>
+</html>
