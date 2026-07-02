@@ -133,11 +133,12 @@
 
   <div class="note-box">
     <b>Data source.</b> Hourly temperature and dewpoint come from the NWS gridpoint forecast at
-    <code>api.weather.gov/gridpoints/BOX/48,100/forecast/hourly</code>. Surface pressure comes from the raw
-    numerical gridpoint data at the same office/grid (<code>.../gridpoints/BOX/48,100</code>) when NWS publishes
-    it for this office; if a pressure forecast isn't available for a given hour, this page falls back to standard
-    sea-level pressure (29.92" / 1013.25 hPa) for that hour and flags it (≈) in the table, using field elevation
-    alone for pressure altitude that hour.
+    <code>api.weather.gov/gridpoints/BOX/48,100/forecast/hourly</code>. Surface pressure and field elevation
+    come from <code>api.open-meteo.com</code> (NOAA model guidance) for the same coordinates, matched to the
+    nearest hour — NWS's own gridpoint pressure field exists in the schema but isn't actually populated for
+    most forecast offices, BOX included, so it isn't usable as a source. If no pressure value can be matched
+    within 90 minutes of an hour, this page falls back to standard sea-level pressure (29.92" / 1013.25 hPa)
+    for that hour and flags it (≈) in the table.
   </div>
 
   <div id="status" class="status">Fetching forecast…</div>
@@ -202,7 +203,7 @@
 
 <script>
 const HOURLY_URL = 'https://api.weather.gov/gridpoints/BOX/48,100/forecast/hourly';
-const RAW_URL = 'https://api.weather.gov/gridpoints/BOX/48,100';
+const PRESSURE_URL = 'https://api.open-meteo.com/v1/forecast?latitude=42.4386&longitude=-71.7535&hourly=surface_pressure&timezone=America%2FNew_York&forecast_days=7';
 
 let rawHours = [];
 
@@ -254,32 +255,6 @@ function daColor(da, fieldElevFt){
   return '#ff6b5e';
 }
 
-// Parse a simplified ISO8601 duration (PT#H, P#D, P#DT#H) into hours.
-function parseDurationHours(dur){
-  const dMatch = dur.match(/P(?:(\d+)D)?T?(?:(\d+)H)?/);
-  const days = dMatch && dMatch[1] ? parseInt(dMatch[1],10) : 0;
-  const hrs = dMatch && dMatch[2] ? parseInt(dMatch[2],10) : 0;
-  return days*24 + hrs;
-}
-
-// Expand NWS gridpoint {validTime:"2026-07-01T12:00:00+00:00/PT3H", value:...} entries
-// into an array of {start:Date, end:Date, value} intervals.
-function expandIntervals(values){
-  return (values||[]).map(v=>{
-    const [startStr, durStr] = v.validTime.split('/');
-    const start = new Date(startStr);
-    const hrs = parseDurationHours(durStr);
-    const end = new Date(start.getTime() + hrs*3600*1000);
-    return {start, end, value: v.value};
-  });
-}
-function valueAt(intervals, t){
-  for(const iv of intervals){
-    if(t >= iv.start && t < iv.end) return iv.value;
-  }
-  return null;
-}
-
 async function fetchJson(url){
   const res = await fetch(url);
   if(!res.ok) throw new Error(url.split('/').slice(-2).join('/') + ' \u2192 HTTP ' + res.status);
@@ -289,23 +264,27 @@ async function fetchJson(url){
 async function load(){
   const statusEl = document.getElementById('status');
   try{
-    const [hourlyData, rawData] = await Promise.all([
+    const [hourlyData, pressureData] = await Promise.all([
       fetchJson(HOURLY_URL),
-      fetchJson(RAW_URL).catch(()=>null) // pressure/elevation are a bonus, not required
+      fetchJson(PRESSURE_URL)
     ]);
 
     const periods = hourlyData.properties.periods;
 
-    let elevFt = 0;
-    if(rawData && rawData.properties.elevation && rawData.properties.elevation.value != null){
-      const elevVal = rawData.properties.elevation.value;
-      const unit = rawData.properties.elevation.unitCode || '';
-      elevFt = unit.includes('ft') ? elevVal : elevVal * 3.28084;
-    }
+    const elevM = pressureData.elevation;
+    let elevFt = (typeof elevM === 'number') ? elevM * 3.28084 : 0;
 
-    let pressureIntervals = [];
-    if(rawData && rawData.properties.pressure){
-      pressureIntervals = expandIntervals(rawData.properties.pressure.values);
+    const pTimes = pressureData.hourly.time.map(t => new Date(t).getTime());
+    const pValues = pressureData.hourly.surface_pressure;
+
+    function pressureNear(t){
+      const target = t.getTime();
+      let bestI = -1, bestDiff = Infinity;
+      for(let i=0;i<pTimes.length;i++){
+        const diff = Math.abs(pTimes[i]-target);
+        if(diff<bestDiff){ bestDiff=diff; bestI=i; }
+      }
+      return (bestI>=0 && bestDiff <= 90*60*1000) ? pValues[bestI] : null; // within 90 min
     }
 
     document.getElementById('locName').textContent =
@@ -317,10 +296,10 @@ async function load(){
       const tempC = fToC(tempF);
       const dewC = p.dewpoint && p.dewpoint.value != null ? p.dewpoint.value : null;
 
-      let pressurePa = valueAt(pressureIntervals, time);
+      const pv = pressureNear(time);
       let pressureHpa, pressureIsStandard;
-      if(pressurePa != null){
-        pressureHpa = pressurePa / 100;
+      if(pv != null){
+        pressureHpa = pv;
         pressureIsStandard = false;
       } else {
         pressureHpa = 1013.25;
@@ -332,8 +311,7 @@ async function load(){
     }).filter(h => !isNaN(h.da));
 
     if(!elevFt && rawHours.length){
-      // fall back: use first hour's standard-day pressure altitude as a stand-in field elevation
-      elevFt = rawHours[0].pa;
+      elevFt = rawHours[0].pa; // fallback stand-in if elevation truly unavailable
     }
     window.__fieldElevFt = elevFt;
 
