@@ -416,6 +416,12 @@ function buildChart(hours){
     gridSvg += `<line x1="${padL}" y1="${gy.toFixed(1)}" x2="${W-padR}" y2="${gy.toFixed(1)}" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>`;
     gridSvg += `<text x="${padL-8}" y="${(gy+4).toFixed(1)}" text-anchor="end" font-size="11" fill="#8b98b3">${fmt(val)}</text>`;
   }
+  let tAxisSvg = '';
+  for(let s=0; s<=4; s++){
+    const val = tMin + (tMax-tMin)*s/4;
+    const gy = yT(val);
+    tAxisSvg += `<text x="${W-padR+8}" y="${(gy+4).toFixed(1)}" text-anchor="start" font-size="11" fill="#8b98b3">${fmt(val)}°</text>`;
+  }
   const step = Math.max(1, Math.round(slice.length / (hours>72?12:8)));
   let xLabels = '';
   slice.forEach((h,i)=>{
@@ -434,6 +440,7 @@ function buildChart(hours){
   svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
   svg.innerHTML = `
     ${gridSvg}
+    ${tAxisSvg}
     <line x1="${padL}" y1="${fieldY}" x2="${W-padR}" y2="${fieldY}" stroke="#57d9c9" stroke-width="1.5" stroke-dasharray="4,4"/>
     <path d="${daArea}" fill="rgba(255,182,39,0.12)" stroke="none"/>
     <path d="${tempPath}" fill="none" stroke="#8b98b3" stroke-width="1.5"/>
