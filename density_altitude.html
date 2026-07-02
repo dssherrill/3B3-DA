@@ -126,6 +126,7 @@
 <header>
   <div class="eyebrow">GBSC · Soaring Weather Tool</div>
   <h1>Density Altitude Forecast</h1>
+  <div class="sub">for 3B3 Sterling Airport, Sterling, Massachusetts</div>
   <div class="sub" id="locSub">NWS temp/dewpt + Open-Meteo pressure · <span id="locName">loading…</span></div>
 </header>
 
@@ -204,7 +205,8 @@
 
 <script>
 const HOURLY_URL = 'https://api.weather.gov/gridpoints/BOX/48,100/forecast/hourly';
-const PRESSURE_URL = 'https://api.open-meteo.com/v1/forecast?latitude=42.4386&longitude=-71.7535&hourly=surface_pressure&timezone=America%2FNew_York&forecast_days=7';
+const PRESSURE_URL = 'https://api.open-meteo.com/v1/forecast?latitude=42.4259025&longitude=-71.7928508&hourly=surface_pressure&timezone=America%2FNew_York&forecast_days=7';
+const FIELD_ELEV_FT = 460;
 
 let rawHours = [];
 
@@ -272,8 +274,7 @@ async function load(){
 
     const periods = hourlyData.properties.periods;
 
-    const elevM = pressureData.elevation;
-    let elevFt = (typeof elevM === 'number') ? elevM * 3.28084 : 0;
+    let elevFt = FIELD_ELEV_FT;
 
     const pTimes = pressureData.hourly.time.map(t => new Date(t).getTime());
     const pValues = pressureData.hourly.surface_pressure;
@@ -288,8 +289,7 @@ async function load(){
       return (bestI>=0 && bestDiff <= 90*60*1000) ? pValues[bestI] : null; // within 90 min
     }
 
-    document.getElementById('locName').textContent =
-      elevFt ? `elev. ${fmt(elevFt)} ft MSL` : 'elevation unavailable';
+    document.getElementById('locName').textContent = `elev. ${fmt(elevFt)} ft MSL`;
 
     rawHours = periods.map(p=>{
       const time = new Date(p.startTime);
@@ -312,10 +312,6 @@ async function load(){
       return {time, tempC, dewC, pressure: pressureHpa, pressureMissing, pa, da};
     }).filter(h => h.da === null || isFinite(h.da));
 
-    if(!elevFt && rawHours.length){
-      const firstWithPa = rawHours.find(h => h.pa !== null);
-      elevFt = firstWithPa ? firstWithPa.pa : 0; // fallback stand-in if elevation truly unavailable
-    }
     window.__fieldElevFt = elevFt;
 
     render();
