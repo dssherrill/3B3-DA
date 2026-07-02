@@ -137,8 +137,8 @@
     come from <code>api.open-meteo.com</code> (NOAA model guidance) for the same coordinates, matched to the
     nearest hour — NWS's own gridpoint pressure field exists in the schema but isn't actually populated for
     most forecast offices, BOX included, so it isn't usable as a source. If no pressure value can be matched
-    within 90 minutes of an hour, this page falls back to standard sea-level pressure (29.92" / 1013.25 hPa)
-    for that hour and flags it (≈) in the table.
+    within 90 minutes of an hour, density altitude and pressure altitude for that hour are shown as
+    <b>N/A</b> — no fallback to standard pressure is used, as that would silently produce misleading values.
   </div>
 
   <div id="status" class="status">Fetching forecast…</div>
@@ -298,21 +298,23 @@ async function load(){
       const dewC = p.dewpoint && p.dewpoint.value != null ? p.dewpoint.value : null;
 
       const pv = pressureNear(time);
-      let pressureHpa, pressureIsStandard;
+      let pressureHpa, pressureMissing, pa, da;
       if(pv != null){
         pressureHpa = pv;
-        pressureIsStandard = false;
+        pressureMissing = false;
+        const calc = densityAltitudeFt(pressureHpa, tempC, dewC);
+        pa = calc.pa; da = calc.da;
       } else {
-        pressureHpa = 1013.25;
-        pressureIsStandard = true;
+        pressureHpa = null;
+        pressureMissing = true;
+        pa = null; da = null;
       }
-
-      const {pa, da} = densityAltitudeFt(pressureHpa, tempC, dewC);
-      return {time, tempC, dewC, pressure: pressureHpa, pressureIsStandard, pa, da};
-    }).filter(h => !isNaN(h.da));
+      return {time, tempC, dewC, pressure: pressureHpa, pressureMissing, pa, da};
+    }).filter(h => h.da === null || isFinite(h.da));
 
     if(!elevFt && rawHours.length){
-      elevFt = rawHours[0].pa; // fallback stand-in if elevation truly unavailable
+      const firstWithPa = rawHours.find(h => h.pa !== null);
+      elevFt = firstWithPa ? firstWithPa.pa : 0; // fallback stand-in if elevation truly unavailable
     }
     window.__fieldElevFt = elevFt;
 
@@ -347,28 +349,31 @@ function render(){
   const now = rawHours[nowIdx];
 
   const daNow = document.getElementById('daNow');
-  daNow.textContent = fmt(now.da);
-  daNow.style.color = daColor(now.da, fieldElevFt);
+  daNow.textContent = now.da !== null ? fmt(now.da) : 'N/A';
+  if(now.da !== null) daNow.style.color = daColor(now.da, fieldElevFt);
 
-  const gain = now.da - fieldElevFt;
+  const gain = now.da !== null ? now.da - fieldElevFt : null;
   document.getElementById('daNowNote').textContent =
+    gain === null ? 'Pressure data unavailable — density altitude cannot be computed.' :
     gain < 1500 ? 'Good performance — close to field elevation.' :
     gain < 3500 ? 'Moderate degradation — expect longer ground roll & reduced climb.' :
     'Significant degradation — high & hot conditions, plan accordingly.';
 
-  const peak = rawHours.slice(nowIdx, nowIdx+24).reduce((a,b)=> b.da>a.da?b:a, now);
+  const next24 = rawHours.slice(nowIdx, nowIdx+24).filter(h => h.da !== null);
+  const peak = next24.length ? next24.reduce((a,b)=> b.da>a.da?b:a) : null;
 
-  const dryDA = densityAltitudeFt(now.pressure, now.tempC, null).da;
-  const humidityAdd = now.da - dryDA;
+  const humidityAdd = now.da !== null
+    ? now.da - densityAltitudeFt(now.pressure, now.tempC, null).da
+    : null;
 
   const stats = [
     ['Field elevation', fmt(fieldElevFt)+' ft'],
     ['Surface temp / dewpt', fmt(cToF(now.tempC),0)+' / '+(now.dewC!=null?fmt(cToF(now.dewC),0):'—')+' °F'],
-    ['Surface pressure', (now.pressureIsStandard?'≈ ':'')+fmt(now.pressure,1)+' hPa'],
-    ['Pressure altitude', fmt(now.pa)+' ft'],
-    ['Humidity contribution', (humidityAdd>=0?'+':'')+fmt(humidityAdd)+' ft'],
-    ['Peak DA (next 24h)', fmt(peak.da)+' ft @ '+peak.time.toLocaleTimeString([], {hour:'numeric'})],
-    ['DA above field', (gain>=0?'+':'')+fmt(gain)+' ft'],
+    ['Surface pressure', now.pressureMissing ? 'N/A' : fmt(now.pressure,1)+' hPa'],
+    ['Pressure altitude', now.pa !== null ? fmt(now.pa)+' ft' : 'N/A'],
+    ['Humidity contribution', humidityAdd !== null ? (humidityAdd>=0?'+':'')+fmt(humidityAdd)+' ft' : 'N/A'],
+    ['Peak DA (next 24h)', peak ? fmt(peak.da)+' ft @ '+peak.time.toLocaleTimeString([], {hour:'numeric'}) : 'N/A'],
+    ['DA above field', gain !== null ? (gain>=0?'+':'')+fmt(gain)+' ft' : 'N/A'],
   ];
   document.getElementById('statList').innerHTML = stats.map(([k,v])=>
     `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
@@ -395,7 +400,8 @@ function buildChart(hours){
   const W = 900, H = 340, padL = 46, padR = 46, padT = 16, padB = 34;
   const plotW = W - padL - padR, plotH = H - padT - padB;
 
-  const daVals = slice.map(h=>h.da);
+  const daVals = slice.map(h=>h.da).filter(v => v !== null);
+  if(!daVals.length) return;
   const tempVals = slice.map(h=>cToF(h.tempC));
   const yMin = Math.min(...daVals, fieldElevFt) - 300;
   const yMax = Math.max(...daVals, fieldElevFt) + 300;
@@ -405,8 +411,34 @@ function buildChart(hours){
   const yDa = v => padT + plotH - ((v-yMin)/(yMax-yMin))*plotH;
   const yT = v => padT + plotH - ((v-tMin)/(tMax-tMin))*plotH;
 
-  const daPath = slice.map((h,i)=> (i===0?'M':'L') + x(i).toFixed(1) + ',' + yDa(h.da).toFixed(1)).join(' ');
-  const daArea = daPath + ` L${x(slice.length-1).toFixed(1)},${(padT+plotH).toFixed(1)} L${x(0).toFixed(1)},${(padT+plotH).toFixed(1)} Z`;
+  // Build DA path and area fill with gaps where pressure data is missing
+  let daPath = '', prevHadDa = false;
+  slice.forEach((h, i) => {
+    if(h.da === null){ prevHadDa = false; return; }
+    daPath += (prevHadDa ? ' L' : (daPath ? ' M' : 'M')) + x(i).toFixed(1) + ',' + yDa(h.da).toFixed(1);
+    prevHadDa = true;
+  });
+  let daAreaPaths = [], segCoords = [], segFirstX = null;
+  slice.forEach((h, i) => {
+    if(h.da === null) {
+      if(segCoords.length) {
+        daAreaPaths.push(segCoords.map((c,j)=>(j?'L':'M')+c).join(' ')
+          + ` L${segCoords[segCoords.length-1].split(',')[0]},${(padT+plotH).toFixed(1)}`
+          + ` L${segFirstX},${(padT+plotH).toFixed(1)} Z`);
+        segCoords = []; segFirstX = null;
+      }
+    } else {
+      const coord = x(i).toFixed(1) + ',' + yDa(h.da).toFixed(1);
+      if(!segCoords.length) segFirstX = x(i).toFixed(1);
+      segCoords.push(coord);
+    }
+  });
+  if(segCoords.length) {
+    daAreaPaths.push(segCoords.map((c,j)=>(j?'L':'M')+c).join(' ')
+      + ` L${segCoords[segCoords.length-1].split(',')[0]},${(padT+plotH).toFixed(1)}`
+      + ` L${segFirstX},${(padT+plotH).toFixed(1)} Z`);
+  }
+  const daArea = daAreaPaths.join(' ');
   const tempPath = slice.map((h,i)=> (i===0?'M':'L') + x(i).toFixed(1) + ',' + yT(cToF(h.tempC)).toFixed(1)).join(' ');
   const fieldY = yDa(fieldElevFt).toFixed(1);
 
@@ -433,6 +465,7 @@ function buildChart(hours){
   });
 
   const pts = slice.map((h,i)=>
+    h.da === null ? '' :
     `<circle cx="${x(i).toFixed(1)}" cy="${yDa(h.da).toFixed(1)}" r="7" fill="transparent"
       data-t="${h.time.toISOString()}" data-da="${Math.round(h.da)}" data-temp="${Math.round(cToF(h.tempC))}" class="hoverpt"/>`
   ).join('');
@@ -470,14 +503,16 @@ function buildTable(){
   const nowIdx = currentHourIndex();
   const slice = rawHours.slice(nowIdx, nowIdx+48);
   document.getElementById('tableBody').innerHTML = slice.map(h=>{
-    const c = daColor(h.da, fieldElevFt);
+    const daCell = h.da !== null
+      ? `<span class="dot" style="background:${daColor(h.da, fieldElevFt)}"></span>${fmt(h.da)}`
+      : '<span style="color:var(--text-dim)">N/A</span>';
     return `<tr>
       <td>${h.time.toLocaleString([], {weekday:'short', hour:'numeric', minute:'2-digit'})}</td>
       <td>${fmt(cToF(h.tempC))}</td>
       <td>${h.dewC!=null ? fmt(cToF(h.dewC)) : '—'}</td>
-      <td>${h.pressureIsStandard?'≈ ':''}${fmt(h.pressure,1)}</td>
-      <td>${fmt(h.pa)}</td>
-      <td><span class="dot" style="background:${c}"></span>${fmt(h.da)}</td>
+      <td>${h.pressureMissing ? '<span style="color:var(--text-dim)">N/A</span>' : fmt(h.pressure,1)}</td>
+      <td>${h.pa !== null ? fmt(h.pa) : '<span style="color:var(--text-dim)">N/A</span>'}</td>
+      <td>${daCell}</td>
     </tr>`;
   }).join('');
 }
