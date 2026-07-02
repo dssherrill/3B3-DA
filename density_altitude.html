@@ -181,7 +181,7 @@
       <div class="table-scroll">
         <table>
           <thead>
-            <tr><th>Time</th><th>Temp °F</th><th>Dewpt °F</th><th>Pressure hPa</th><th>Press. Alt ft</th><th>Density Alt ft</th></tr>
+            <tr><th>Time</th><th>Temp °F</th><th>Dew pt °F</th><th>Pressure <span style="text-transform:none">hPa</span></th><th>Press. Alt ft</th><th>Density Alt ft</th></tr>
           </thead>
           <tbody id="tableBody"></tbody>
         </table>
@@ -207,6 +207,8 @@
 const HOURLY_URL = 'https://api.weather.gov/gridpoints/BOX/48,100/forecast/hourly';
 const PRESSURE_URL = 'https://api.open-meteo.com/v1/forecast?latitude=42.4259025&longitude=-71.7928508&hourly=surface_pressure&timezone=America%2FNew_York&forecast_days=7';
 const FIELD_ELEV_FT = 460;
+const DA_GAIN_CAUTION_FT = 1500;  // cyan → amber
+const DA_GAIN_WARNING_FT = 3500;  // amber → red
 
 let rawHours = [];
 
@@ -253,8 +255,8 @@ function densityAltitudeFt(pressureHpa, tempC, dewC){
 }
 function daColor(da, fieldElevFt){
   const gain = da - fieldElevFt;
-  if (gain < 1500) return '#57d9c9';
-  if (gain < 3500) return '#ffb627';
+  if (gain < DA_GAIN_CAUTION_FT) return '#57d9c9';
+  if (gain < DA_GAIN_WARNING_FT) return '#ffb627';
   return '#ff6b5e';
 }
 
@@ -351,8 +353,8 @@ function render(){
   const gain = now.da !== null ? now.da - fieldElevFt : null;
   document.getElementById('daNowNote').textContent =
     gain === null ? 'Pressure data unavailable — density altitude cannot be computed.' :
-    gain < 1500 ? 'Good performance — close to field elevation.' :
-    gain < 3500 ? 'Moderate degradation — expect longer ground roll & reduced climb.' :
+    gain < DA_GAIN_CAUTION_FT ? 'Good performance — close to field elevation.' :
+    gain < DA_GAIN_WARNING_FT ? 'Moderate degradation — expect longer ground roll & reduced climb.' :
     'Significant degradation — high & hot conditions, plan accordingly.';
 
   const next24 = rawHours.slice(nowIdx, nowIdx+24).filter(h => h.da !== null);
@@ -364,7 +366,7 @@ function render(){
 
   const stats = [
     ['Field elevation', fmt(fieldElevFt)+' ft'],
-    ['Surface temp / dewpt', fmt(cToF(now.tempC),0)+' / '+(now.dewC!=null?fmt(cToF(now.dewC),0):'—')+' °F'],
+    ['Surface temp / dew pt', fmt(cToF(now.tempC),0)+' / '+(now.dewC!=null?fmt(cToF(now.dewC),0):'—')+' °F'],
     ['Surface pressure', now.pressureMissing ? 'N/A' : fmt(now.pressure,1)+' hPa'],
     ['Pressure altitude', now.pa !== null ? fmt(now.pa)+' ft' : 'N/A'],
     ['Humidity contribution', humidityAdd !== null ? (humidityAdd>=0?'+':'')+fmt(humidityAdd)+' ft' : 'N/A'],
