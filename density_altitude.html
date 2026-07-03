@@ -349,8 +349,6 @@ async function load(){
     const renderedErrMsg = String(err && err.message ? err.message : 'Unknown error').replace(/\n/g, '<br>');
     statusEl.innerHTML =
       'Could not load forecast data (' + renderedErrMsg + ').<br><br>' +
-      'If you are viewing this inside Claude\'s in-chat preview, that sandbox blocks live API calls \u2014 ' +
-      'save this file and open it directly in your browser instead.<br><br>' +
       '<button id="retryBtn">Retry</button>';
     statusEl.classList.add('error');
     const btn = document.getElementById('retryBtn');
