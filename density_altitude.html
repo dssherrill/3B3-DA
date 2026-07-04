@@ -127,17 +127,16 @@
   <div class="eyebrow">GBSC · Soaring Weather Tool</div>
   <h1>Density Altitude Forecast</h1>
   <div class="sub">for 3B3 Sterling Airport, Sterling, Massachusetts</div>
-  <div class="sub" id="locSub">NWS temp/dewpt + Open-Meteo pressure · <span id="locName">loading…</span></div>
+  <div class="sub" id="locSub">Observed METAR current value + forecast trend · <span id="locName">loading…</span></div>
 </header>
 
 <div class="wrap">
 
   <div class="note-box">
-    <b>Data source.</b> Hourly temperature and dewpoint come from the NWS gridpoint forecast at
-    <code>api.weather.gov/gridpoints/BOX/48,100/forecast/hourly</code>. Surface pressure and field elevation
-    come from <code>api.open-meteo.com</code> (NOAA model guidance) for the same coordinates, matched to the
-    nearest hour — NWS's own gridpoint pressure field exists in the schema but isn't actually populated for
-    most forecast offices, BOX included, so it isn't usable as a source. If no pressure value can be matched
+    <b>Data source.</b> The <b>current</b> density altitude gauge is computed from the latest METAR-style
+    observation at KFIT. The forecast chart and hourly table use NWS hourly temperature/dewpoint forecasts from
+    <code>api.weather.gov/gridpoints/BOX/48,100/forecast/hourly</code>, with surface pressure from
+    <code>api.open-meteo.com</code> matched to the nearest forecast hour. If no pressure value can be matched
     within 90 minutes of an hour, density altitude and pressure altitude for that hour are shown as
     <b>N/A</b>.
   </div>
@@ -151,6 +150,7 @@
         <div class="gauge-label">Current Density Altitude</div>
         <div class="gauge-value" id="daNow">—</div>
         <div class="gauge-unit">feet</div>
+        <div class="gauge-note" id="daNowNote"></div>
       </div>
       <div class="stat-list" id="statList"></div>
     </div>
@@ -205,12 +205,15 @@
 <script>
 const HOURLY_URL = 'https://api.weather.gov/gridpoints/BOX/48,100/forecast/hourly';
 const PRESSURE_URL = 'https://api.open-meteo.com/v1/forecast?latitude=42.4259025&longitude=-71.7928508&hourly=surface_pressure&timezone=America%2FNew_York&forecast_days=7';
+const CURRENT_OBS_URL = 'https://api.weather.gov/stations/KFIT/observations/latest';
+const KFIT_ELEV_FT = 345;
 const FIELD_ELEV_FT = 460;
 const REQUEST_TIMEOUT_MS = 12000;
 const DA_GAIN_CAUTION_FT = 1000;  // cyan → amber
 const DA_GAIN_WARNING_FT = 2500;  // amber → red
 
 let rawHours = [];
+let currentObs = null;
 
 function fToC(f){ return (f-32)*5/9; }
 function cToF(c){ return c*9/5+32; }
@@ -218,6 +221,10 @@ function fmt(n,d=0){ return Number(n).toLocaleString(undefined,{maximumFractionD
 
 function pressureAltitudeFt(pressureHpa){
   return 145366.45 * (1 - Math.pow(pressureHpa/1013.25, 0.190284));
+}
+
+function paToHpa(pa){
+  return pa / 100;
 }
 
 // Saturation vapor pressure (Tetens formula, hPa) at a given temperature in °C.
@@ -284,7 +291,8 @@ async function load(){
   try{
     const sourceRequests = [
       {name:'NWS hourly forecast', promise: fetchJson(HOURLY_URL, 'NWS hourly forecast')},
-      {name:'Open-Meteo pressure', promise: fetchJson(PRESSURE_URL, 'Open-Meteo pressure')}
+      {name:'Open-Meteo pressure', promise: fetchJson(PRESSURE_URL, 'Open-Meteo pressure')},
+      {name:'KFIT latest observation', promise: fetchJson(CURRENT_OBS_URL, 'KFIT latest observation')}
     ];
     const results = await Promise.allSettled(sourceRequests.map(s => s.promise));
 
@@ -299,6 +307,29 @@ async function load(){
 
     const hourlyData = results[0].value;
     const pressureData = results[1].value;
+    const currentData = results[2].value;
+    const currentProps = currentData.properties || {};
+    const currentTempC = currentProps.temperature && currentProps.temperature.value != null ? currentProps.temperature.value : null;
+    const currentDewC = currentProps.dewpoint && currentProps.dewpoint.value != null ? currentProps.dewpoint.value : null;
+    const currentPressurePa = currentProps.barometricPressure && currentProps.barometricPressure.value != null ? currentProps.barometricPressure.value : null;
+    if(currentTempC == null || currentPressurePa == null) throw new Error('KFIT observation is missing temperature or pressure');
+
+    const currentPressureHpa = paToHpa(currentPressurePa);
+    const currentCalc = densityAltitudeFt(currentPressureHpa, currentTempC, currentDewC);
+    const currentElevDeltaFt = FIELD_ELEV_FT - KFIT_ELEV_FT;
+    currentObs = {
+      stationId: 'KFIT',
+      stationName: currentProps.stationName || 'Fitchburg, Fitchburg Municipal Airport',
+      time: currentProps.timestamp ? new Date(currentProps.timestamp) : new Date(),
+      tempC: currentTempC,
+      dewC: currentDewC,
+      pressure: currentPressureHpa,
+      pressureMissing: false,
+      pa: currentCalc.pa,
+      sourceDa: currentCalc.da,
+      da: currentCalc.da + currentElevDeltaFt,
+      elevDeltaFt: currentElevDeltaFt
+    };
 
     const periods = hourlyData.properties.periods;
 
@@ -369,10 +400,19 @@ function currentHourIndex(){
 function render(){
   const fieldElevFt = window.__fieldElevFt;
   const nowIdx = currentHourIndex();
-  const now = rawHours[nowIdx];
+  const forecastNow = rawHours[nowIdx];
+  const now = currentObs || forecastNow;
 
   const daNow = document.getElementById('daNow');
   daNow.textContent = now.da !== null ? fmt(now.da) : 'N/A';
+
+  const daNowNote = document.getElementById('daNowNote');
+  if(currentObs){
+    const deltaLabel = currentObs.elevDeltaFt >= 0 ? `+${fmt(currentObs.elevDeltaFt)}` : fmt(currentObs.elevDeltaFt);
+    daNowNote.textContent = `${currentObs.stationId} METAR ${deltaLabel} ft to Sterling · ${currentObs.time.toLocaleString([], {weekday:'short', hour:'numeric', minute:'2-digit'})}`;
+  } else {
+    daNowNote.textContent = 'Forecast fallback: no recent observation available.';
+  }
 
   const gain = now.da !== null ? now.da - fieldElevFt : null;
 
@@ -380,7 +420,7 @@ function render(){
   const peak = next24.length ? next24.reduce((a,b)=> b.da>a.da?b:a) : null;
 
   const humidityAdd = now.da !== null
-    ? now.da - densityAltitudeFt(now.pressure, now.tempC, null).da
+    ? (now.sourceDa ?? now.da) - densityAltitudeFt(now.pressure, now.tempC, null).da
     : null;
 
   const stats = [
