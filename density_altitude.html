@@ -227,8 +227,22 @@ function paToHpa(pa){
   return pa / 100;
 }
 
+// https://en.wikipedia.org/wiki/Barometric_formula
+function seaLevelToStationPressureHpa(seaLevelHpa, elevFt){
+  const hMeters = elevFt * 0.3048;
+  const T0 = 288.15;
+  const L = 0.0065;
+  const exponent = 5.2558797;
+  const base = Math.max(1 - (L * hMeters / T0), 1e-6);
+  return seaLevelHpa * Math.pow(base, exponent);
+}
+
 // Saturation vapor pressure (Tetens formula, hPa) at a given temperature in °C.
 // At the dewpoint, air is saturated, so this also gives the actual vapor pressure e.
+// This uses the base-10 Magnus-Tetens form (7.5/237.3). The common exp form
+// with 17.27 is equivalent because 7.5*ln(10) = 17.27.
+// https://en.wikipedia.org/wiki/Tetens_equation
+// Note that 1 kPa = 10 hPa
 function satVaporPressureHpa(tC){
   return 6.1078 * Math.pow(10, (7.5*tC)/(237.3+tC));
 }
@@ -236,6 +250,7 @@ function satVaporPressureHpa(tC){
 // Virtual temperature (K): the temperature dry air would need to match the
 // density of the actual moist air at the same pressure. Humid air is less
 // dense than dry air at the same T/P, so Tv > T whenever moisture is present.
+// https://en.wikipedia.org/wiki/Virtual_temperature
 function virtualTempK(tempC, dewC, pressureHpa){
   const Tk = tempC + 273.15;
   if(dewC == null) return Tk; // no moisture data -> fall back to dry air
@@ -253,10 +268,12 @@ function densityAltitudeFt(pressureHpa, tempC, dewC){
   const Tv = virtualTempK(tempC, dewC, pressureHpa);
   const rho = (pressureHpa*100) / (287.05 * Tv); // kg/m^3, moist-air density
 
-  const rho0 = 1.225, T0 = 288.15, L = 0.0065; // ISA sea-level density, temp, lapse rate
+  // ISA sea-level density, temp, lapse rate
+  // https://en.wikipedia.org/wiki/International_Standard_Atmosphere
+  const rho0 = 1.225, T0 = 288.15, L = 0.0065; 
   const ratio = Math.max(rho/rho0, 1e-6);
   const hMeters = (T0/L) * (1 - Math.pow(ratio, 1/4.2559));
-  const da = hMeters * 3.28084;
+  const da = hMeters * 3.28084;  // convert meters to feet
 
   return {pa, da};
 }
@@ -311,10 +328,24 @@ async function load(){
     const currentProps = currentData.properties || {};
     const currentTempC = currentProps.temperature && currentProps.temperature.value != null ? currentProps.temperature.value : null;
     const currentDewC = currentProps.dewpoint && currentProps.dewpoint.value != null ? currentProps.dewpoint.value : null;
-    const currentPressurePa = currentProps.barometricPressure && currentProps.barometricPressure.value != null ? currentProps.barometricPressure.value : null;
-    if(currentTempC == null || currentPressurePa == null) throw new Error('KFIT observation is missing temperature or pressure');
+    const currentStationPressurePa = currentProps.stationPressure && currentProps.stationPressure.value != null ? currentProps.stationPressure.value : null;
+    const currentBarometricPressurePa = currentProps.barometricPressure && currentProps.barometricPressure.value != null ? currentProps.barometricPressure.value : null;
 
-    const currentPressureHpa = paToHpa(currentPressurePa);
+    // Use station pressure if available.
+    // Otherwise, use barometric pressure and adjust for field elevation
+    let currentPressureHpa = null;
+    let currentPressureSource = 'none';
+    if(currentStationPressurePa != null){
+      currentPressureHpa = paToHpa(currentStationPressurePa);
+      currentPressureSource = 'station';
+    } else if(currentBarometricPressurePa != null){
+      const seaLevelHpa = paToHpa(currentBarometricPressurePa);
+      currentPressureHpa = seaLevelToStationPressureHpa(seaLevelHpa, KFIT_ELEV_FT);
+      currentPressureSource = 'derived-from-barometric';
+    }
+
+    if(currentTempC == null || currentPressureHpa == null) throw new Error('KFIT observation is missing temperature or pressure');
+
     const currentCalc = densityAltitudeFt(currentPressureHpa, currentTempC, currentDewC);
     const currentElevDeltaFt = FIELD_ELEV_FT - KFIT_ELEV_FT;
     currentObs = {
@@ -324,7 +355,9 @@ async function load(){
       tempC: currentTempC,
       dewC: currentDewC,
       pressure: currentPressureHpa,
+      barometricPressure: currentBarometricPressurePa != null ? paToHpa(currentBarometricPressurePa) : null,
       pressureMissing: false,
+      pressureSource: currentPressureSource,
       pa: currentCalc.pa,
       sourceDa: currentCalc.da,
       da: currentCalc.da + currentElevDeltaFt,
@@ -409,7 +442,8 @@ function render(){
   const daNowNote = document.getElementById('daNowNote');
   if(currentObs){
     const deltaLabel = currentObs.elevDeltaFt >= 0 ? `+${fmt(currentObs.elevDeltaFt)}` : fmt(currentObs.elevDeltaFt);
-    daNowNote.textContent = `${currentObs.stationId} METAR ${deltaLabel} ft to Sterling · ${currentObs.time.toLocaleString([], {weekday:'short', hour:'numeric', minute:'2-digit'})}`;
+    const pressureLabel = currentObs.pressureSource === 'station' ? 'station pressure' : 'derived station pressure';
+    daNowNote.textContent = `${currentObs.stationId} METAR ${deltaLabel} ft to Sterling · ${currentObs.time.toLocaleString([], {weekday:'short', hour:'numeric', minute:'2-digit'})} · ${pressureLabel}`;
   } else {
     daNowNote.textContent = 'Forecast fallback: no recent observation available.';
   }
@@ -426,6 +460,9 @@ function render(){
   const stats = [
     ['Field elevation', fmt(fieldElevFt)+' ft'],
     ['Surface temp / dew pt', fmt(cToF(now.tempC),0)+' / '+(now.dewC!=null?fmt(cToF(now.dewC),0):'—')+' °F'],
+    ['Obs pressure (SLP -> station)', currentObs
+      ? (now.barometricPressure != null ? `${fmt(now.barometricPressure,1)} -> ${fmt(now.pressure,1)} hPa` : `${fmt(now.pressure,1)} hPa (station)`)
+      : 'N/A'],
     ['Surface pressure', now.pressureMissing ? 'N/A' : fmt(now.pressure,1)+' hPa'],
     ['Pressure altitude', now.pa !== null ? fmt(now.pa)+' ft' : 'N/A'],
     ['Humidity contribution', humidityAdd !== null ? (humidityAdd>=0?'+':'')+fmt(humidityAdd)+' ft' : 'N/A'],
