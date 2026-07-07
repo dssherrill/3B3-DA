@@ -117,6 +117,12 @@
     background:rgba(255,182,39,0.08); border:1px solid var(--amber-dim); border-radius:10px;
     padding:12px 16px; font-size:12px; color:var(--text-dim); margin-bottom:22px; line-height:1.55;
   }
+  .note-box a,
+  .note-box a:visited{
+    color:#7fe7ff;
+    text-decoration:underline;
+    text-underline-offset:2px;
+  }
   .note-box b{color:var(--amber);}
   @media (max-width:640px){ .stat-list{grid-template-columns:1fr;} }
 </style>
@@ -133,11 +139,15 @@
 <div class="wrap">
 
   <div class="note-box">
-    <b>Data source.</b> The <b>current</b> density altitude gauge is computed from the latest METAR-style
-    observation at KFIT. The forecast chart and hourly table use NWS hourly temperature/dewpoint forecasts from
-    <code>api.weather.gov/gridpoints/BOX/48,100/forecast/hourly</code>, with surface pressure from
-    <code>api.open-meteo.com</code> matched to the nearest forecast hour. If no pressure value can be matched
-    within 90 minutes of an hour, density altitude and pressure altitude for that hour are shown as
+    <b>Data source.</b> The <b>current</b> density altitude is computed from the latest
+    <A href='https://api.weather.gov/stations/KFIT/observations/latest'>NWS observations at KFIT</A>. 
+    The <b>forecast</b> chart and hourly table use NWS hourly temperature/dewpoint 
+    <A href='https://api.weather.gov/gridpoints/BOX/48,100/forecast/hourly'>forecasts from KFIT</A>,
+    with surface pressure from
+    <A href='https://api.open-meteo.com/v1/forecast?latitude=42.4259025&longitude=-71.7928508&hourly=surface_pressure&timezone=America%2FNew_York&forecast_days=7'>
+    Open Meteo</A> matched to the nearest forecast hour.
+    If no pressure value can be matched within 90 minutes of an hour, density altitude 
+    and pressure altitude for that hour are shown as
     <b>N/A</b>.
   </div>
 
@@ -157,7 +167,7 @@
 
     <div class="panel">
       <h2>
-        <span>Density Altitude Trend</span>
+        <span>Density Altitude Forecast</span>
         <span class="range-toggle" id="rangeToggle">
           <button data-h="24">24H</button>
           <button data-h="72" class="active">72H</button>
@@ -459,7 +469,7 @@ function render(){
 
   const stats = [
     ['Field elevation', fmt(fieldElevFt)+' ft'],
-    ['Surface temp / dew pt', fmt(cToF(now.tempC),0)+' / '+(now.dewC!=null?fmt(cToF(now.dewC),0):'—')+' °F'],
+    ['Surface Temp,  Dew Pt', fmt(cToF(now.tempC),0)+'°F, '+(now.dewC!=null?fmt(cToF(now.dewC),0):'—')+'°F'],
     ['Obs pressure (SLP -> station)', currentObs
       ? (now.barometricPressure != null ? `${fmt(now.barometricPressure,1)} -> ${fmt(now.pressure,1)} hPa` : `${fmt(now.pressure,1)} hPa (station)`)
       : 'N/A'],
