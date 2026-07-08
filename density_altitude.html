@@ -219,8 +219,6 @@ const CURRENT_OBS_URL = 'https://api.weather.gov/stations/KFIT/observations/late
 const KFIT_ELEV_FT = 345;
 const FIELD_ELEV_FT = 460;
 const REQUEST_TIMEOUT_MS = 12000;
-const DA_GAIN_CAUTION_FT = 1000;  // cyan → amber
-const DA_GAIN_WARNING_FT = 2500;  // amber → red
 
 let rawHours = [];
 let currentObs = null;
@@ -286,13 +284,6 @@ function densityAltitudeFt(pressureHpa, tempC, dewC){
   const da = hMeters * 3.28084;  // convert meters to feet
 
   return {pa, da};
-}
-
-function daColor(da, fieldElevFt){
-  const gain = da - fieldElevFt;
-  if (gain < DA_GAIN_CAUTION_FT) return '#57d9c9';
-  if (gain < DA_GAIN_WARNING_FT) return '#ffb627';
-  return '#ff6b5e';
 }
 
 async function fetchJson(url, sourceLabel){
