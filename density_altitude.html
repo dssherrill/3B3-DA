@@ -498,8 +498,11 @@ function buildChart(hours){
   const daVals = slice.map(h=>h.da).filter(v => v !== null);
   if(!daVals.length) return;
   const tempVals = slice.map(h=>cToF(h.tempC));
-  const yMin = Math.min(...daVals, fieldElevFt) - 300;
-  const yMax = Math.max(...daVals, fieldElevFt) + 300;
+  const rawYMin = Math.min(...daVals, fieldElevFt) - 300;
+  const rawYMax = Math.max(...daVals, fieldElevFt) + 300;
+  const yTick = Math.max(100, Math.ceil(((rawYMax - rawYMin) / 4) / 100) * 100);
+  const yMin = Math.floor(rawYMin / yTick) * yTick;
+  const yMax = Math.ceil(rawYMax / yTick) * yTick;
   const tMin = Math.min(...tempVals) - 5, tMax = Math.max(...tempVals) + 5;
 
   const x = i => padL + (slice.length===1 ? plotW/2 : (i/(slice.length-1))*plotW);
@@ -538,8 +541,7 @@ function buildChart(hours){
   const fieldY = yDa(fieldElevFt).toFixed(1);
 
   let gridSvg = '';
-  for(let s=0; s<=4; s++){
-    const val = yMin + (yMax-yMin)*s/4;
+  for(let val = yMin; val <= yMax + 0.1; val += yTick){
     const gy = yDa(val);
     gridSvg += `<line x1="${padL}" y1="${gy.toFixed(1)}" x2="${W-padR}" y2="${gy.toFixed(1)}" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>`;
     gridSvg += `<text x="${padL-8}" y="${(gy+4).toFixed(1)}" text-anchor="end" font-size="11" fill="#8b98b3">${fmt(val)}</text>`;
