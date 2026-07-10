@@ -211,20 +211,13 @@ Forecast path:
 - Match is accepted only if within 90 minutes.
 - If no pressure match exists, pressure altitude and density altitude are shown as N/A for that hour.
 
-## 6) Operational Threshold Coloring
-
-DA gain above field elevation drives color coding:
-- Gain < 1000 ft: cyan
-- 1000 ft to < 2500 ft: amber
-- >= 2500 ft: red
-
-## 7) Error Handling and Data Availability
+## 6) Error Handling and Data Availability
 
 - Each API call uses a 12-second timeout.
 - If any required source fails, the UI shows an error with a Retry button.
 - Missing pressure for forecast hour results in N/A for pressure, pressure altitude, and density altitude for that hour.
 
-## 8) Notes from Repository Memory
+## 7) Notes from Repository Memory
 
 Previously captured project note indicates:
 - NWS barometricPressure in latest observations is sea-level adjusted (altimeter-like), not station pressure.
@@ -232,7 +225,7 @@ Previously captured project note indicates:
 
 This behavior matches the current implementation.
 
-## 9) Recent Conversation Notes (Available in This Session)
+## 8) Recent Conversation Notes (Available in This Session)
 
 The local session history database currently returned no prior saved conversation rows, so only current-session context is available.
 
@@ -241,7 +234,3 @@ Current conversation highlights:
 2. I extracted formulas and assumptions from the current implementation.
 3. I checked local session history storage, which returned no prior stored turns in this environment.
 4. This document therefore includes full calculation documentation plus current-session conversation notes.
-
-## 10) Suggested Future Improvement
-
-If historical conversation summaries are required automatically, enable/populate the local session index and add a small export step that appends the latest saved turns into this document format.

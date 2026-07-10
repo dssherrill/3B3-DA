@@ -461,8 +461,8 @@ function render(){
   const stats = [
     ['Field elevation', fmt(fieldElevFt)+' ft'],
     ['Surface Temp,  Dew Pt', fmt(cToF(now.tempC),0)+'°F, '+(now.dewC!=null?fmt(cToF(now.dewC),0):'—')+'°F'],
-    ['Obs pressure (SLP -> station)', currentObs
-      ? (now.barometricPressure != null ? `${fmt(now.barometricPressure,1)} -> ${fmt(now.pressure,1)} hPa` : `${fmt(now.pressure,1)} hPa (station)`)
+    ['Obs pressure (SLP &rarr; station)', currentObs
+      ? (now.barometricPressure != null ? `${fmt(now.barometricPressure,1)} &rarr; ${fmt(now.pressure,1)} hPa` : `${fmt(now.pressure,1)} hPa (station)`)
       : 'N/A'],
     ['Surface pressure', now.pressureMissing ? 'N/A' : fmt(now.pressure,1)+' hPa'],
     ['Pressure altitude', now.pa !== null ? fmt(now.pa)+' ft' : 'N/A'],
