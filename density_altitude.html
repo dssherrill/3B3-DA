@@ -314,65 +314,104 @@ async function load(){
     ];
     const results = await Promise.allSettled(sourceRequests.map(s => s.promise));
 
-    const failed = results
-      .map((r, i) => ({result:r, name:sourceRequests[i].name}))
-      .filter(x => x.result.status === 'rejected');
+    const unavailable = [];
+    const settled = results.map((r, i) => ({result:r, name:sourceRequests[i].name}));
+    settled.forEach(x => {
+      if(x.result.status === 'rejected'){
+        const reason = x.result.reason?.message || 'did not respond';
+        unavailable.push(`${x.name}: ${reason}`);
+      }
+    });
 
-    if(failed.length){
-      const failedMsg = failed.map(x => x.result.reason?.message || (x.name + ' did not respond')).join('\n');
-      throw new Error('Missing data source response:\n' + failedMsg);
+    const hourlyData = results[0].status === 'fulfilled' ? results[0].value : null;
+    const pressureData = results[1].status === 'fulfilled' ? results[1].value : null;
+    const currentData = results[2].status === 'fulfilled' ? results[2].value : null;
+
+    if(!hourlyData && !currentData){
+      throw new Error('Neither NWS hourly forecast nor KFIT latest observation is available.');
     }
 
-    const hourlyData = results[0].value;
-    const pressureData = results[1].value;
-    const currentData = results[2].value;
-    const currentProps = currentData.properties || {};
-    const currentTempC = currentProps.temperature && currentProps.temperature.value != null ? currentProps.temperature.value : null;
-    const currentDewC = currentProps.dewpoint && currentProps.dewpoint.value != null ? currentProps.dewpoint.value : null;
-    const currentStationPressurePa = currentProps.stationPressure && currentProps.stationPressure.value != null ? currentProps.stationPressure.value : null;
-    const currentBarometricPressurePa = currentProps.barometricPressure && currentProps.barometricPressure.value != null ? currentProps.barometricPressure.value : null;
+    currentObs = null;
+    if(currentData){
+      const currentProps = currentData.properties || {};
+      const currentTempC = currentProps.temperature && currentProps.temperature.value != null ? currentProps.temperature.value : null;
+      const currentDewC = currentProps.dewpoint && currentProps.dewpoint.value != null ? currentProps.dewpoint.value : null;
+      const currentStationPressurePa = currentProps.stationPressure && currentProps.stationPressure.value != null ? currentProps.stationPressure.value : null;
+      const currentBarometricPressurePa = currentProps.barometricPressure && currentProps.barometricPressure.value != null ? currentProps.barometricPressure.value : null;
 
-    // Use station pressure if available.
-    // Otherwise, use barometric pressure and adjust for field elevation
-    let currentPressureHpa = null;
-    let currentPressureSource = 'none';
-    if(currentStationPressurePa != null){
-      currentPressureHpa = paToHpa(currentStationPressurePa);
-      currentPressureSource = 'station';
-    } else if(currentBarometricPressurePa != null){
-      const seaLevelHpa = paToHpa(currentBarometricPressurePa);
-      currentPressureHpa = seaLevelToStationPressureHpa(seaLevelHpa, KFIT_ELEV_FT);
-      currentPressureSource = 'derived-from-barometric';
+      // Use station pressure if available.
+      // Otherwise, use barometric pressure and adjust for field elevation.
+      let currentPressureHpa = null;
+      let currentPressureSource = 'none';
+      if(currentStationPressurePa != null){
+        currentPressureHpa = paToHpa(currentStationPressurePa);
+        currentPressureSource = 'station';
+      } else if(currentBarometricPressurePa != null){
+        const seaLevelHpa = paToHpa(currentBarometricPressurePa);
+        currentPressureHpa = seaLevelToStationPressureHpa(seaLevelHpa, KFIT_ELEV_FT);
+        currentPressureSource = 'derived-from-barometric';
+      }
+
+      if(currentTempC != null && currentPressureHpa != null){
+        const currentCalc = densityAltitudeFt(currentPressureHpa, currentTempC, currentDewC);
+        const currentElevDeltaFt = FIELD_ELEV_FT - KFIT_ELEV_FT;
+        currentObs = {
+          stationId: 'KFIT',
+          stationName: currentProps.stationName || 'Fitchburg, Fitchburg Municipal Airport',
+          time: currentProps.timestamp ? new Date(currentProps.timestamp) : new Date(),
+          tempC: currentTempC,
+          dewC: currentDewC,
+          pressure: currentPressureHpa,
+          barometricPressure: currentBarometricPressurePa != null ? paToHpa(currentBarometricPressurePa) : null,
+          pressureMissing: false,
+          pressureSource: currentPressureSource,
+          pa: currentCalc.pa,
+          sourceDa: currentCalc.da,
+          da: currentCalc.da + currentElevDeltaFt,
+          elevDeltaFt: currentElevDeltaFt
+        };
+      } else {
+        unavailable.push('KFIT latest observation is missing temperature or pressure.');
+      }
     }
 
-    if(currentTempC == null || currentPressureHpa == null) throw new Error('KFIT observation is missing temperature or pressure');
+    const periods = hourlyData && hourlyData.properties && Array.isArray(hourlyData.properties.periods)
+      ? hourlyData.properties.periods
+      : [];
 
-    const currentCalc = densityAltitudeFt(currentPressureHpa, currentTempC, currentDewC);
-    const currentElevDeltaFt = FIELD_ELEV_FT - KFIT_ELEV_FT;
-    currentObs = {
-      stationId: 'KFIT',
-      stationName: currentProps.stationName || 'Fitchburg, Fitchburg Municipal Airport',
-      time: currentProps.timestamp ? new Date(currentProps.timestamp) : new Date(),
-      tempC: currentTempC,
-      dewC: currentDewC,
-      pressure: currentPressureHpa,
-      barometricPressure: currentBarometricPressurePa != null ? paToHpa(currentBarometricPressurePa) : null,
-      pressureMissing: false,
-      pressureSource: currentPressureSource,
-      pa: currentCalc.pa,
-      sourceDa: currentCalc.da,
-      da: currentCalc.da + currentElevDeltaFt,
-      elevDeltaFt: currentElevDeltaFt
-    };
-
-    const periods = hourlyData.properties.periods;
+    if(hourlyData && !periods.length){
+      unavailable.push('NWS hourly forecast did not include period data.');
+    }
 
     let elevFt = FIELD_ELEV_FT;
+    const rawPTimes = pressureData?.hourly && Array.isArray(pressureData.hourly.time)
+      ? pressureData.hourly.time
+      : [];
+    const rawPValues = pressureData?.hourly && Array.isArray(pressureData.hourly.surface_pressure)
+      ? pressureData.hourly.surface_pressure
+      : [];
 
-    const pTimes = pressureData.hourly.time.map(t => new Date(t).getTime());
-    const pValues = pressureData.hourly.surface_pressure;
+    const pressureSamples = rawPTimes.length === rawPValues.length
+      ? rawPTimes.map((time, i) => ({
+          time: new Date(time).getTime(),
+          value: rawPValues[i]
+        })).filter(({time, value}) =>
+          Number.isFinite(time) &&
+          value != null &&
+          Number.isFinite(Number(value))
+        )
+      : [];
+
+    const pTimes = pressureSamples.map(({time}) => time);
+    const pValues = pressureSamples.map(({value}) => Number(value));
+
+    if(pressureData &&
+       (!rawPTimes.length || pressureSamples.length !== rawPTimes.length)){
+      unavailable.push('Open-Meteo pressure response contained missing or invalid hourly values.');
+    }
 
     function pressureNear(t){
+      if(!pTimes.length || !pValues.length) return null;
       const target = t.getTime();
       let bestI = -1, bestDiff = Infinity;
       for(let i=0;i<pTimes.length;i++){
@@ -405,10 +444,22 @@ async function load(){
       return {time, tempC, dewC, pressure: pressureHpa, pressureMissing, pa, da};
     }).filter(h => h.da === null || isFinite(h.da));
 
+    if(!currentObs && !rawHours.length){
+      throw new Error('No usable current or forecast weather data was returned.');
+    }
+
     window.__fieldElevFt = elevFt;
 
     render();
-    statusEl.style.display='none';
+    if(unavailable.length){
+      statusEl.innerHTML =
+        'Loaded with limited data:<br>' +
+        unavailable.map(msg => '- ' + msg).join('<br>');
+      statusEl.classList.remove('error');
+      statusEl.style.display = 'block';
+    } else {
+      statusEl.style.display='none';
+    }
     document.getElementById('content').style.display='block';
   }catch(err){
     const renderedErrMsg = String(err && err.message ? err.message : 'Unknown error').replace(/\n/g, '<br>');
