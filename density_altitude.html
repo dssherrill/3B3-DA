@@ -391,22 +391,23 @@ async function load(){
       ? pressureData.hourly.surface_pressure
       : [];
 
-    const pressureSamples = rawPTimes.length === rawPValues.length
-      ? rawPTimes.map((time, i) => ({
-          time: new Date(time).getTime(),
-          value: rawPValues[i]
-        })).filter(({time, value}) =>
-          Number.isFinite(time) &&
-          value != null &&
-          Number.isFinite(Number(value))
-        )
-      : [];
+    const pressureSampleCount = Math.min(rawPTimes.length, rawPValues.length);
+    const pressureSamples = Array.from({length: pressureSampleCount}, (_, i) => ({
+      time: new Date(rawPTimes[i]).getTime(),
+      value: rawPValues[i]
+    })).filter(({time, value}) =>
+      Number.isFinite(time) &&
+      value != null &&
+      Number.isFinite(Number(value))
+    );
 
     const pTimes = pressureSamples.map(({time}) => time);
     const pValues = pressureSamples.map(({value}) => Number(value));
 
     if(pressureData &&
-       (!rawPTimes.length || pressureSamples.length !== rawPTimes.length)){
+       (!pressureSampleCount ||
+        rawPTimes.length !== rawPValues.length ||
+        pressureSamples.length !== pressureSampleCount)){
       unavailable.push('Open-Meteo pressure response contained missing or invalid hourly values.');
     }
 
