@@ -33,11 +33,13 @@ This document describes how density altitude is computed in the current tool, wh
 ## 4.1 Unit conversions
 
 - Fahrenheit to Celsius:
+
 $$
 C = (F - 32) \cdot \frac{5}{9}
 $$
 
 - Celsius to Fahrenheit:
+
 $$
 F = C \cdot \frac{9}{5} + 32
 $$
