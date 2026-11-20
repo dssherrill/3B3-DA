@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Density Altitude Forecast — GBSC</title>
+<title>Density Altitude Forecast</title>
 <style>
   :root{
     --bg:#0a0e17;
@@ -126,13 +126,59 @@
   .note-box b{color:var(--amber);}
   @media (max-width:640px){ .stat-list{grid-template-columns:1fr;} }
 </style>
+<!--
+==========================================================================
+  SITE CONFIGURATION  --  the only block you need to edit for a new site
+==========================================================================
+  How to find each value (all free, US sites only):
+
+  lat, lon        Airport reference point (e.g. from airnav.com).
+  fieldElevFt     Published field elevation, feet MSL.
+  nwsGrid         Open  https://api.weather.gov/points/<lat>,<lon>
+                  and copy  properties.gridId  -> office,
+                            properties.gridX   -> x,
+                            properties.gridY   -> y
+  obsStation      A nearby NWS observation station that reports
+                  temperature, dewpoint and pressure (an ASOS/AWOS airport,
+                  e.g. "KFIT").  The same /points response lists candidates
+                  at properties.observationStations; pick a close one at a
+                  similar elevation.  Open
+                  https://api.weather.gov/stations/<ID>/observations/latest
+                  to confirm it has recent data.  elevFt is that station's
+                  elevation in feet MSL (the API reports it in meters under
+                  properties.elevation -- multiply by 3.28084).
+-->
+<script>
+const SITE = {
+  // ---- display text ----
+  eyebrow:     'GBSC · Weather Briefing Tools',
+  airportName: '3B3 Sterling Airport',
+  place:       'Sterling, Massachusetts',
+  shortName:   'Sterling',              // used in "+115 ft to Sterling"
+
+  // ---- location ----
+  lat: 42.4259025,
+  lon: -71.7928508,
+  fieldElevFt: 460,
+
+  // ---- NWS forecast grid point (from api.weather.gov/points/lat,lon) ----
+  nwsGrid: { office: 'BOX', x: 48, y: 100 },
+
+  // ---- nearest NWS observation station ----
+  obsStation: {
+    id: 'KFIT',
+    name: 'Fitchburg Municipal Airport',   // fallback if the API gives no name
+    elevFt: 345
+  }
+};
+</script>
 </head>
 <body>
 
 <header>
-  <div class="eyebrow">GBSC · Weather Briefing Tools</div>
+  <div class="eyebrow" id="siteEyebrow"></div>
   <h1>Density Altitude Forecast</h1>
-  <div class="sub">for 3B3 Sterling Airport, Sterling, Massachusetts</div>
+  <div class="sub" id="siteSub"></div>
   <div class="sub" id="locSub">Observed METAR current value + forecast trend · <span id="locName">loading…</span></div>
 </header>
 
@@ -140,12 +186,11 @@
 
   <div class="note-box">
     <b>Data source.</b> The <b>current</b> density altitude is computed from the latest
-    <A href='https://api.weather.gov/stations/KFIT/observations/latest'>NWS observations at KFIT</A>. 
+    <a id="obsLink" href="#"></a>. 
     The <b>forecast</b> chart and hourly table use NWS hourly temperature/dewpoint 
-    <A href='https://api.weather.gov/gridpoints/BOX/48,100/forecast/hourly'>forecasts from KFIT</A>,
+    <a id="hourlyLink" href="#"></a>,
     with surface pressure from
-    <A href='https://api.open-meteo.com/v1/forecast?latitude=42.4259025&longitude=-71.7928508&hourly=surface_pressure&timezone=America%2FNew_York&forecast_days=7'>
-    Open Meteo</A> matched to the nearest forecast hour.
+    <a id="pressureLink" href="#">Open Meteo</a> matched to the nearest forecast hour.
     If no pressure value can be matched within 90 minutes of an hour, density altitude 
     and pressure altitude for that hour are shown as
     <b>N/A</b>.
@@ -213,12 +258,32 @@
 </div>
 
 <script>
-const HOURLY_URL = 'https://api.weather.gov/gridpoints/BOX/48,100/forecast/hourly';
-const PRESSURE_URL = 'https://api.open-meteo.com/v1/forecast?latitude=42.4259025&longitude=-71.7928508&hourly=surface_pressure&timezone=America%2FNew_York&forecast_days=7';
-const CURRENT_OBS_URL = 'https://api.weather.gov/stations/KFIT/observations/latest';
-const KFIT_ELEV_FT = 345;
-const FIELD_ELEV_FT = 460;
+// Everything below is derived from SITE (see the CONFIG block in <head>).
+const OBS_ID = SITE.obsStation.id;
+const OBS_ELEV_FT = SITE.obsStation.elevFt;
+const FIELD_ELEV_FT = SITE.fieldElevFt;
+const HOURLY_URL = `https://api.weather.gov/gridpoints/${SITE.nwsGrid.office}/${SITE.nwsGrid.x},${SITE.nwsGrid.y}/forecast/hourly`;
+const CURRENT_OBS_URL = `https://api.weather.gov/stations/${OBS_ID}/observations/latest`;
+// Open-Meteo times are requested in GMT and parsed as UTC (see pressure parsing
+// below), so they match NWS timestamps for any site and any viewer time zone.
+// forecast_days=8 so the GMT-day boundary never cuts off the end of the NWS hourly range.
+const PRESSURE_URL = `https://api.open-meteo.com/v1/forecast?latitude=${SITE.lat}&longitude=${SITE.lon}&hourly=surface_pressure&timezone=GMT&forecast_days=8`;
 const REQUEST_TIMEOUT_MS = 12000;
+
+// Fill in site-specific page text and links.
+document.title = `Density Altitude Forecast — ${SITE.airportName}`;
+document.getElementById('siteEyebrow').textContent = SITE.eyebrow;
+document.getElementById('siteSub').textContent = `for ${SITE.airportName}, ${SITE.place}`;
+(function(){
+  const set = (id, href, text) => {
+    const a = document.getElementById(id);
+    a.href = href;
+    if(text) a.textContent = text;
+  };
+  set('obsLink', CURRENT_OBS_URL, `NWS observations at ${OBS_ID}`);
+  set('hourlyLink', HOURLY_URL, `forecasts for ${SITE.shortName} vicinity (NWS grid ${SITE.nwsGrid.office} ${SITE.nwsGrid.x},${SITE.nwsGrid.y})`);
+  set('pressureLink', PRESSURE_URL);
+})();
 
 let rawHours = [];
 let currentObs = null;
@@ -310,7 +375,7 @@ async function load(){
     const sourceRequests = [
       {name:'NWS hourly forecast', promise: fetchJson(HOURLY_URL, 'NWS hourly forecast')},
       {name:'Open-Meteo pressure', promise: fetchJson(PRESSURE_URL, 'Open-Meteo pressure')},
-      {name:'KFIT latest observation', promise: fetchJson(CURRENT_OBS_URL, 'KFIT latest observation')}
+      {name: `${OBS_ID} latest observation`, promise: fetchJson(CURRENT_OBS_URL, `${OBS_ID} latest observation`)}
     ];
     const results = await Promise.allSettled(sourceRequests.map(s => s.promise));
 
@@ -328,7 +393,7 @@ async function load(){
     const currentData = results[2].status === 'fulfilled' ? results[2].value : null;
 
     if(!hourlyData && !currentData){
-      throw new Error('Neither NWS hourly forecast nor KFIT latest observation is available.');
+      throw new Error(`Neither NWS hourly forecast nor ${OBS_ID} latest observation is available.`);
     }
 
     currentObs = null;
@@ -340,7 +405,7 @@ async function load(){
       const currentBarometricPressurePa = currentProps.barometricPressure && currentProps.barometricPressure.value != null ? currentProps.barometricPressure.value : null;
 
       // Use station pressure if available.
-      // Otherwise, use barometric pressure and adjust for field elevation.
+      // Otherwise, use barometric pressure and adjust for the observation station's elevation.
       let currentPressureHpa = null;
       let currentPressureSource = 'none';
       if(currentStationPressurePa != null){
@@ -348,16 +413,16 @@ async function load(){
         currentPressureSource = 'station';
       } else if(currentBarometricPressurePa != null){
         const seaLevelHpa = paToHpa(currentBarometricPressurePa);
-        currentPressureHpa = seaLevelToStationPressureHpa(seaLevelHpa, KFIT_ELEV_FT);
+        currentPressureHpa = seaLevelToStationPressureHpa(seaLevelHpa, OBS_ELEV_FT);
         currentPressureSource = 'derived-from-barometric';
       }
 
       if(currentTempC != null && currentPressureHpa != null){
         const currentCalc = densityAltitudeFt(currentPressureHpa, currentTempC, currentDewC);
-        const currentElevDeltaFt = FIELD_ELEV_FT - KFIT_ELEV_FT;
+        const currentElevDeltaFt = FIELD_ELEV_FT - OBS_ELEV_FT;
         currentObs = {
-          stationId: 'KFIT',
-          stationName: currentProps.stationName || 'Fitchburg, Fitchburg Municipal Airport',
+          stationId: OBS_ID,
+          stationName: currentProps.stationName || SITE.obsStation.name,
           time: currentProps.timestamp ? new Date(currentProps.timestamp) : new Date(),
           tempC: currentTempC,
           dewC: currentDewC,
@@ -371,7 +436,7 @@ async function load(){
           elevDeltaFt: currentElevDeltaFt
         };
       } else {
-        unavailable.push('KFIT latest observation is missing temperature or pressure.');
+        unavailable.push(`${OBS_ID} latest observation is missing temperature or pressure.`);
       }
     }
 
@@ -393,7 +458,7 @@ async function load(){
 
     const pressureSampleCount = Math.min(rawPTimes.length, rawPValues.length);
     const pressureSamples = Array.from({length: pressureSampleCount}, (_, i) => ({
-      time: new Date(rawPTimes[i]).getTime(),
+      time: new Date(rawPTimes[i] + 'Z').getTime(), // requested in GMT, returned without an offset
       value: rawPValues[i]
     })).filter(({time, value}) =>
       Number.isFinite(time) &&
@@ -496,7 +561,7 @@ function render(){
   if(currentObs){
     const deltaLabel = currentObs.elevDeltaFt >= 0 ? `+${fmt(currentObs.elevDeltaFt)}` : fmt(currentObs.elevDeltaFt);
     const pressureLabel = currentObs.pressureSource === 'station' ? 'station pressure' : 'derived station pressure';
-    daNowNote.textContent = `${currentObs.stationId} METAR ${deltaLabel} ft to Sterling · ${currentObs.time.toLocaleString([], {weekday:'short', hour:'numeric', minute:'2-digit'})} · ${pressureLabel}`;
+    daNowNote.textContent = `${currentObs.stationId} METAR ${deltaLabel} ft to ${SITE.shortName} · ${currentObs.time.toLocaleString([], {weekday:'short', hour:'numeric', minute:'2-digit'})} · ${pressureLabel}`;
   } else {
     daNowNote.textContent = 'Forecast fallback: no recent observation available.';
   }
