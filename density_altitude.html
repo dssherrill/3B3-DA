@@ -124,6 +124,13 @@
     text-underline-offset:2px;
   }
   .note-box b{color:var(--amber);}
+  .data-times{
+    margin-top:10px; padding-top:10px; border-top:1px solid var(--amber-dim);
+    display:flex; flex-wrap:wrap; gap:6px 28px; font-size:13px;
+  }
+  .data-times .lbl{color:var(--text-dim);}
+  .data-times .val{color:var(--text); font-weight:600;}
+  .data-times .age{color:var(--text-dim); font-weight:400;}
   @media (max-width:640px){ .stat-list{grid-template-columns:1fr;} }
 </style>
 <!--
@@ -194,6 +201,10 @@ const SITE = {
     If no pressure value can be matched within 90 minutes of an hour, density altitude 
     and pressure altitude for that hour are shown as
     <b>N/A</b>.
+    <div class="data-times">
+      <div><span class="lbl">Observation time:</span> <span class="val" id="obsTime">loading…</span></div>
+      <div><span class="lbl">Forecast updated:</span> <span class="val" id="forecastTime">loading…</span></div>
+    </div>
   </div>
 
   <div id="status" class="status">Fetching forecast…</div>
@@ -287,6 +298,19 @@ document.getElementById('siteSub').textContent = `for ${SITE.airportName}, ${SIT
 
 let rawHours = [];
 let currentObs = null;
+
+function showDataTime(id, isoString){
+  const el = document.getElementById(id);
+  const d = isoString ? new Date(isoString) : null;
+  if(!d || isNaN(d.getTime())){
+    el.textContent = 'unavailable';
+    return;
+  }
+  const stamp = d.toLocaleString([], {weekday:'short', month:'short', day:'numeric', hour:'numeric', minute:'2-digit', timeZoneName:'short'});
+  const mins = Math.max(0, Math.round((Date.now() - d.getTime()) / 60000));
+  const age = mins < 90 ? `${mins} min ago` : `${fmt(mins/60, 1)} h ago`;
+  el.innerHTML = `${stamp} <span class="age">(${age})</span>`;
+}
 
 function fToC(f){ return (f-32)*5/9; }
 function cToF(c){ return c*9/5+32; }
@@ -391,6 +415,9 @@ async function load(){
     const hourlyData = results[0].status === 'fulfilled' ? results[0].value : null;
     const pressureData = results[1].status === 'fulfilled' ? results[1].value : null;
     const currentData = results[2].status === 'fulfilled' ? results[2].value : null;
+
+    showDataTime('obsTime', currentData?.properties?.timestamp);
+    showDataTime('forecastTime', hourlyData?.properties?.updateTime || hourlyData?.properties?.generatedAt);
 
     if(!hourlyData && !currentData){
       throw new Error(`Neither NWS hourly forecast nor ${OBS_ID} latest observation is available.`);
@@ -561,7 +588,7 @@ function render(){
   if(currentObs){
     const deltaLabel = currentObs.elevDeltaFt >= 0 ? `+${fmt(currentObs.elevDeltaFt)}` : fmt(currentObs.elevDeltaFt);
     const pressureLabel = currentObs.pressureSource === 'station' ? 'station pressure' : 'derived station pressure';
-    daNowNote.textContent = `${currentObs.stationId} METAR ${deltaLabel} ft to ${SITE.shortName} · ${currentObs.time.toLocaleString([], {weekday:'short', hour:'numeric', minute:'2-digit'})} · ${pressureLabel}`;
+    daNowNote.textContent = `${currentObs.stationId} METAR ${deltaLabel} ft to ${SITE.shortName} · ${pressureLabel}`;
   } else {
     daNowNote.textContent = 'Forecast fallback: no recent observation available.';
   }
